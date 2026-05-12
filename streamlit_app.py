@@ -2,14 +2,17 @@ import os
 import requests
 import streamlit as st
 from dotenv import load_dotenv
-from langchain_community.tools import DuckDuckGoSearchRun
+# from langchain_community.tools import DuckDuckGoSearchRun
+from langchain_community.tools.tavily_search import TavilySearchResults
 from langchain_groq import ChatGroq
 from langchain_core.tools import tool as make_tool
 from langchain.agents import create_react_agent, AgentExecutor
-from langchain import hub
+# from langchain import hub
 
 # Load environment variables
 load_dotenv()
+
+GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
 # Define the weather fetching tool
 def get_weather_data(city: str) -> str:
@@ -36,20 +39,53 @@ def get_weather_data(city: str) -> str:
 get_weather_data_tool = make_tool(get_weather_data)
 
 # Set up other tools
-search_tool = DuckDuckGoSearchRun()
+# search_tool = DuckDuckGoSearchRun()
+search_tool = TavilySearchResults(max_results=3)
 
 # LLM setup
-llm = ChatGroq(model="llama3-70b-8192", temperature=0)
+llm = ChatGroq(
+    groq_api_key=os.getenv("GROQ_API_KEY"),
+    model_name="llama-3.3-70b-versatile",
+    temperature=0
+)
 
 # Cache agent setup
 @st.cache_resource
 def initialize_agent():
-    prompt = hub.pull("hwchase17/react")
+
+    from langchain_core.prompts import PromptTemplate
+
+    template = """
+    Answer the following questions as best you can.
+    
+    You have access to the following tools:
+    
+    {tools}
+    
+    Use the following format:
+    
+    Question: the input question you must answer
+    Thought: you should always think about what to do
+    Action: the action to take, should be one of [{tool_names}]
+    Action Input: the input to the action
+    Observation: the result of the action
+    ... (this Thought/Action/Action Input/Observation can repeat)
+    Thought: I now know the final answer
+    Final Answer: the final answer to the original input question
+    
+    Question: {input}
+    
+    Thought:{agent_scratchpad}
+    """
+
+    prompt = PromptTemplate.from_template(template)
+
     agent = create_react_agent(
         llm=llm,
         tools=[search_tool, get_weather_data_tool],
         prompt=prompt
     )
+
     return AgentExecutor(
         agent=agent,
         tools=[search_tool, get_weather_data_tool],
